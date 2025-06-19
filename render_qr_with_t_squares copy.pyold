@@ -1,0 +1,83 @@
+from PIL import Image, ImageDraw
+
+# def generate_t_square_tile(data_byte: int, size: int = 10) -> Image.Image:
+#     tile = Image.new("RGB", (size, size), "black")
+#     draw = ImageDraw.Draw(tile)
+
+#     region_size = size // 3
+#     bit_positions = [
+#         (0, 0), (1, 0), (2, 0),
+#         (0, 1),         (2, 1),
+#         (0, 2), (1, 2), (2, 2)
+#     ]
+
+#     for i, (col, row) in enumerate(bit_positions):
+#         if (data_byte >> (7 - i)) & 1:
+#             x0 = col * region_size
+#             y0 = row * region_size
+#             x1 = x0 + region_size
+#             y1 = y0 + region_size
+#             #draw.rectangle([x0, y0, x1, y1], fill="white")  # Visible structure
+#             draw.rectangle([x0, y0, x1, y1], fill=(255, 0, 0))  # 🔴 Red tiles for visibility
+
+
+#     return tile
+def generate_t_square_tile(data_byte: int, size: int = 10) -> Image.Image:
+    tile = Image.new("RGBA", (size, size), (0, 0, 0, 0))  # transparent tile
+    draw = ImageDraw.Draw(tile)
+
+    region_size = size // 3
+    bit_positions = [
+        (0, 0), (1, 0), (2, 0),
+        (0, 1),         (2, 1),
+        (0, 2), (1, 2), (2, 2)
+    ]
+
+    for i, (col, row) in enumerate(bit_positions):
+        if (data_byte >> (7 - i)) & 1:
+            x0 = col * region_size
+            y0 = row * region_size
+            x1 = x0 + region_size
+            y1 = y0 + region_size
+            draw.rectangle([x0, y0, x1, y1], fill=(255, 0, 0, 200))  # semi-transparent red
+
+    return tile
+
+
+def render_qr_with_t_squares(matrix, bitstream: str, module_size: int = 10) -> Image.Image:
+    qr_size = len(matrix)
+    image_size = qr_size * module_size
+    img = Image.new("RGB", (image_size, image_size), "white")
+
+    bit_chunks = [bitstream[i:i+8] for i in range(0, len(bitstream), 8)]
+    bit_pointer = 0
+
+    for y in range(qr_size):
+        for x in range(qr_size):
+            top_left = (x * module_size, y * module_size)
+            # if matrix[y][x]:  # black module
+            #     if bit_pointer < len(bit_chunks):
+            #         byte = int(bit_chunks[bit_pointer], 2)
+            #         tile = generate_t_square_tile(byte, module_size)
+            #         bit_pointer += 1
+            #     else:
+            #         #tile = Image.new("RGB", (module_size, module_size), "black")
+            #         tile = Image.new("RGB", (module_size, module_size), (255, 0, 0)) 
+            # else:
+            #     #tile = Image.new("RGB", (module_size, module_size), "white")
+            #     tile = generate_t_square_tile(0, module_size)  # Fractal with all 0 bits
+            if matrix[y][x]:
+                base_tile = Image.new("RGB", (module_size, module_size), "black")
+                if bit_pointer < len(bit_chunks):
+                    byte = int(bit_chunks[bit_pointer], 2)
+                    overlay = generate_t_square_tile(byte, module_size)
+                    base_tile.paste(overlay, (0, 0), overlay)  # Overlay RGBA on RGB
+                    bit_pointer += 1
+                tile = base_tile
+            else:
+                tile = Image.new("RGB", (module_size, module_size), "white")
+
+
+            img.paste(tile, top_left)
+
+    return img

@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package event;
+
+message Event {
+  string event_id = 1;
+  string name = 2;
+  string location = 3;
+  string start_time = 4;
+  string end_time = 5;
+
+  AccessLevelPublic public_data = 6;
+  AccessLevelVIP vip_data = 7;
+  AccessLevelStaff staff_data = 8;
+}
+
+message AccessLevelPublic {
+  string agenda_summary = 1;
+  string dress_code = 2;
+  repeated string general_guidelines = 3;
+}
+
+message AccessLevelVIP {
+  string vip_lounge_location = 1;
+  string vip_contact = 2;
+  repeated string exclusive_sessions = 3;
+}
+
+message AccessLevelStaff {
+  string internal_briefing = 1;
+  repeated string security_codes = 2;
+  bool requires_background_check = 3;
+}

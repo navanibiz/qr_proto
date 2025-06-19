@@ -1,0 +1,30 @@
+{
+    "event_id": "EVT-2025-001",
+    "name": "FutureTech Expo 2025",
+    "location": "Convention Center, San Francisco",
+    "start_time": "2025-09-12T09:00:00Z",
+    "end_time": "2025-09-12T18:00:00Z",
+    "public_data": {
+      "agenda_summary": "Talks on AI, IoT, and Sustainable Tech",
+      "dress_code": "Smart Casual",
+      "general_guidelines": [
+        "Carry a valid photo ID",
+        "No outside food allowed",
+        "Arrive 15 minutes early"
+      ]
+    },
+    "vip_data": {
+      "vip_lounge_location": "2nd Floor, Sapphire Lounge",
+      "vip_contact": "vip@futuretech.com",
+      "exclusive_sessions": [
+        "AI Founders Roundtable",
+        "Private Tour with CTO"
+      ]
+    },
+    "staff_data": {
+      "internal_briefing": "Ensure secure entry checkpoints are staffed by 08:30AM.",
+      "security_codes": ["SEC-ALPHA-2025", "SEC-BETA-2025"],
+      "requires_background_check": true
+    }
+  }
+  
