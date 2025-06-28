@@ -95,6 +95,7 @@ def extract_bitstream_from_qr(image_path, module_size=10):
     b1 = extract_byte_from_tile(black_tiles[1])
     print(f"[DEBUG] First 2 header bytes from tiles: {b0:08b}, {b1:08b}")
     header_bytes = [b0, b1]
+    print("📦 header_bytes:", header_bytes, type(header_bytes[0]))
     total_bits = (header_bytes[0] << 8) | header_bytes[1]
     print(f"[DECODE] Total bits to extract (from header): {total_bits}")
 
@@ -118,6 +119,6 @@ def extract_bitstream_from_qr(image_path, module_size=10):
 
 
     print(f"[DECODE] Total bits extracted: {total_bits}")
-    print(f"[DECODE] Tiles used (x, y): {used_coords[:2 + needed_bytes]}")
+    #print(f"[DECODE] Tiles used (x, y): {used_coords[:2 + needed_bytes]}")
 
     return ''.join(f'{byte:08b}' for byte in data_bytes)[:total_bits]

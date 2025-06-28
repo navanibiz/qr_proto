@@ -1,28 +1,42 @@
 from PIL import Image, ImageDraw
 
-# def generate_t_square_tile(data_byte: int, size: int = 10) -> Image.Image:
-#     tile = Image.new("RGB", (size, size), "black")
-#     draw = ImageDraw.Draw(tile)
+# === CONFIGURATION ===
+DEBUG = True  # 🔁 Set to False for production
+#FRACTAL_COLOR = (255, 0, 0, 200) if DEBUG else (0, 0, 0, 255)
+FRACTAL_COLOR = (255, 0, 0, 255)  # 🔴 Fully opaque red for max visibility
+DUMMY_FILLERS = [0b10101010, 0b01010101, 0b11110000, 0b00001111, 0b11001100, 0b00110011]
 
-#     region_size = size // 3
-#     bit_positions = [
-#         (0, 0), (1, 0), (2, 0),
-#         (0, 1),         (2, 1),
-#         (0, 2), (1, 2), (2, 2)
-#     ]
-
-#     for i, (col, row) in enumerate(bit_positions):
-#         if (data_byte >> (7 - i)) & 1:
-#             x0 = col * region_size
-#             y0 = row * region_size
-#             x1 = x0 + region_size
-#             y1 = y0 + region_size
-#             #draw.rectangle([x0, y0, x1, y1], fill="white")  # Visible structure
-#             draw.rectangle([x0, y0, x1, y1], fill=(255, 0, 0))  # 🔴 Red tiles for visibility
-
-
-#     return tile
 def generate_t_square_tile(data_byte: int, size: int = 10) -> Image.Image:
+    """
+    Generates a basic 3x3 T-square fractal tile based on a single byte of data.
+
+    Parameters:
+    - data_byte: An integer (0–255) where each bit determines whether to fill a region.
+    - size: The size (in pixels) of the full tile. Default is 10x10 pixels.
+
+    Returns:
+    - A transparent RGBA image of shape (size x size) with black subregions
+      filled according to the data bits.
+    
+    Bit-to-position mapping (each bit turns on a square in the 3x3 grid):
+        0 1 2
+        3   4
+        5 6 7
+
+    What this DOES:
+    - Encodes 8 bits of information visually into a grid pattern, effectively creating.
+    - Fills only non-center positions (i.e., omits the center cell at (1,1)).
+    - Outputs a transparent tile that can overlay onto other images.
+
+    What this DOES NOT do (yet):
+    - No recursive T-square logic.
+    - Does not use self-similarity to visually encode deeper data hierarchy.
+    - All "black squares" are flat filled rectangles (no fractal detail).
+
+    Scope for recursion:
+    - Each black region could itself be replaced by a smaller T-square tile.
+    - This allows visual nesting (fractal compression) for multilevel roles or data depth.
+    """
     tile = Image.new("RGBA", (size, size), (0, 0, 0, 0))  # transparent tile
     draw = ImageDraw.Draw(tile)
 
@@ -39,45 +53,50 @@ def generate_t_square_tile(data_byte: int, size: int = 10) -> Image.Image:
             y0 = row * region_size
             x1 = x0 + region_size
             y1 = y0 + region_size
-            draw.rectangle([x0, y0, x1, y1], fill=(255, 0, 0, 200))  # semi-transparent red
+            draw.rectangle([x0, y0, x1, y1], fill=FRACTAL_COLOR)
 
     return tile
 
-
 def render_qr_with_t_squares(matrix, bitstream: str, module_size: int = 10) -> Image.Image:
+    print(f"[ENCODE] Total bits to embed: {len(bitstream)}")
     qr_size = len(matrix)
+    available_black_tiles = sum(1 for row in matrix for mod in row if mod)
+    print(f"[DEBUG] 📦 Available black tiles: {available_black_tiles}")
+
     image_size = qr_size * module_size
     img = Image.new("RGB", (image_size, image_size), "white")
 
     bit_chunks = [bitstream[i:i+8] for i in range(0, len(bitstream), 8)]
     bit_pointer = 0
+    dummy_pointer = 0
+    print(f"[DEBUG] ⬛ Embedding {len(bit_chunks)} bytes across tiles")
 
     for y in range(qr_size):
         for x in range(qr_size):
             top_left = (x * module_size, y * module_size)
-            # if matrix[y][x]:  # black module
-            #     if bit_pointer < len(bit_chunks):
-            #         byte = int(bit_chunks[bit_pointer], 2)
-            #         tile = generate_t_square_tile(byte, module_size)
-            #         bit_pointer += 1
-            #     else:
-            #         #tile = Image.new("RGB", (module_size, module_size), "black")
-            #         tile = Image.new("RGB", (module_size, module_size), (255, 0, 0)) 
-            # else:
-            #     #tile = Image.new("RGB", (module_size, module_size), "white")
-            #     tile = generate_t_square_tile(0, module_size)  # Fractal with all 0 bits
-            if matrix[y][x]:
+
+            if matrix[y][x]:  # Black QR module
                 base_tile = Image.new("RGB", (module_size, module_size), "black")
+
                 if bit_pointer < len(bit_chunks):
                     byte = int(bit_chunks[bit_pointer], 2)
-                    overlay = generate_t_square_tile(byte, module_size)
-                    base_tile.paste(overlay, (0, 0), overlay)  # Overlay RGBA on RGB
+                    if bit_pointer <= 2:
+                        print(f"[ENCODE] Tile ({x}, {y}) embeds byte: {byte:08b}")
+                        base_tile.save(f"tile_{bit_pointer - 1}_debug.png")
                     bit_pointer += 1
+                else:
+                    byte = DUMMY_FILLERS[dummy_pointer % len(DUMMY_FILLERS)]
+                    dummy_pointer += 1
+
+                overlay = generate_t_square_tile(byte, module_size)
+                base_tile.paste(overlay, (0, 0), overlay)
                 tile = base_tile
             else:
                 tile = Image.new("RGB", (module_size, module_size), "white")
 
-
             img.paste(tile, top_left)
 
+    # Count how many original modules were black
+    black_count = sum(1 for row in matrix for mod in row if mod)
+    print(f"[RENDER] Final QR matrix black tiles: {black_count}")
     return img

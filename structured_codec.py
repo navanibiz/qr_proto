@@ -1,6 +1,7 @@
 import zlib
+import json
 
-def encode_sections_protobuf(sections: dict) -> str:
+def encode_sections_protobuf(sections: dict, depth: int = 1) -> str:
     full_bytes = b""
 
     for name, proto_obj in sections.items():
@@ -13,13 +14,22 @@ def encode_sections_protobuf(sections: dict) -> str:
         full_bytes += content_bytes
 
     compressed = zlib.compress(full_bytes)
+    bit_length = len(compressed) * 8
 
-    # ⏱️ Add total bit length as first 2 bytes (big endian)
-    total_bits = len(compressed) * 8
-    header = total_bits.to_bytes(2, "big")
-    final_bytes = header + compressed
+    # 🧩 Create JSON header
+    header_dict = {"depth": depth, "bit_length": bit_length}
+    header_json = json.dumps(header_dict, separators=(",", ":")).encode("utf-8")
+
+    if len(header_json) > 255:
+        raise ValueError("Header too long to encode in a single byte length field")
+
+    header_length = len(header_json).to_bytes(1, "big")
+
+    # 👇 Final byte stream
+    final_bytes = header_length + header_json + compressed
 
     return ''.join(f'{byte:08b}' for byte in final_bytes)
+
 
 
 def decode_sections_protobuf(byte_data: bytes, message_factory: dict) -> dict:

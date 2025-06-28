@@ -1,0 +1,98 @@
+import streamlit as st
+from PIL import Image
+import io
+from main import main  # expects: main(role, img_bytes, keys)
+import re
+
+st.set_page_config(page_title="Event Attendee QR Scanner", layout="centered")
+st.title("🎟️ Event Attendee – QR Code Scanner")
+
+# --- Predefined key choices ---
+PREDEFINED_KEYS = {
+    "VIP": ["vip_key_1.pem", "vip_key_2.pem"],
+    "STAFF": ["staff_key_1.pem", "staff_key_2.pem"],
+}
+
+def render_event_sections(event_data: dict):
+    general = event_data.get("general", {})
+    st.markdown("### 🪪 Event Overview")
+
+    event_id = general.get("event_id", "")
+    name = general.get("name", "")
+    location = general.get("location", "")
+    start = general.get("start_time", "").split("T")[0]
+    end = general.get("end_time", "").split("T")[0]
+
+    st.markdown(f"""
+    <div style="background-color:#1e3d59; color:white; padding:10px; border-radius:8px; width:fit-content;">
+        <div style="font-size:22px;"><strong>{name}</strong></div>
+        <div style="font-size:14px; text-align:right;">{event_id}</div>
+    </div>
+    <div style="margin-bottom:10px;">
+        <strong>📍 Venue:</strong> {location}  
+        &nbsp;&nbsp;&nbsp;&nbsp;
+        <strong>📅 Dates:</strong> {start} – {end}
+    </div>
+    """, unsafe_allow_html=True)
+
+    def render_section(title: str, data: dict):
+        st.markdown(f"### {title}")
+        for key, val in data.items():
+            label = re.sub(r"_", " ", key).capitalize()
+            if isinstance(val, list):
+                st.markdown(f"**{label}:**")
+                st.markdown("<br>".join(f"• {item}" for item in val), unsafe_allow_html=True)
+            else:
+                st.markdown(f"**{label}:** {val}")
+
+    if "public_data" in general:
+        render_section("General Information", general["public_data"])
+    if "vip" in event_data:
+        render_section("VIP Information", event_data["vip"])
+    if "staff" in event_data:
+        render_section("Staff Information", event_data["staff"])
+
+
+# --- Upload QR Code ---
+img_file = st.file_uploader("📤 Upload your event QR code", type=["png", "jpg", "jpeg"])
+if img_file:
+    st.image(img_file, caption="Uploaded QR Code", use_container_width=False)
+
+    role = st.selectbox("Select your role", ["General", "VIP", "Staff", "Admin"])
+    keys = {}
+
+    # --- VIP Key Input (if needed) ---
+    if role in ["VIP", "Admin"]:
+        st.markdown("#### 🔑 VIP Decryption Key")
+        vip_key_mode = st.radio("Choose method for VIP key", ["Select Predefined", "Upload PEM"], key="vip_key_mode")
+
+        if vip_key_mode == "Select Predefined":
+            vip_key_choice = st.selectbox("Select a predefined VIP key", PREDEFINED_KEYS["VIP"])
+            with open(f"keys/{vip_key_choice}", "rb") as f:
+                keys["VIP"] = f.read()
+        else:
+            vip_key_file = st.file_uploader("Upload VIP Key (.pem)", type=["pem"], key="vip_key_file")
+            if vip_key_file:
+                keys["VIP"] = vip_key_file.read()
+
+    # --- Staff Key Input (if needed) ---
+    if role in ["Staff", "Admin"]:
+        st.markdown("#### 🔑 Staff Decryption Key")
+        staff_key_mode = st.radio("Choose method for Staff key", ["Select Predefined", "Upload PEM"], key="staff_key_mode")
+
+        if staff_key_mode == "Select Predefined":
+            staff_key_choice = st.selectbox("Select a predefined Staff key", PREDEFINED_KEYS["STAFF"])
+            with open(f"keys/{staff_key_choice}", "rb") as f:
+                keys["STAFF"] = f.read()
+        else:
+            staff_key_file = st.file_uploader("Upload Staff Key (.pem)", type=["pem"], key="staff_key_file")
+            if staff_key_file:
+                keys["STAFF"] = staff_key_file.read()
+
+    if st.button("🔍 Decode and Show My Event Info"):
+        with st.spinner("Decoding..."):
+            result = main(role.lower(), img_file.getvalue(), keys)
+        st.success("✅ Decoded!")
+        render_event_sections(result)
+        with st.expander("📦 Show Raw JSON"):
+            st.json(result)
