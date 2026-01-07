@@ -1,0 +1,85 @@
+@startuml
+title IntentMark — High-Value Event Use Case — Issuance Sequence
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam roundcorner 12
+skinparam ArrowColor #333333
+skinparam DefaultTextAlignment left
+skinparam sequenceMessageAlign left
+skinparam ParticipantPadding 18
+
+actor Organizer as Org
+participant "Issuer Console\n(Admin UI)" as Console
+participant "IntentMark Issuer\n(Generator/SDK)" as Issuer
+participant "Policy Builder\n(Intent + Constraints)" as Policy
+participant "Key Store\n(Root secrets, signing keys)" as Keys
+participant "Public Payload Encoder\n(Standard QR payload)" as PubEnc
+participant "Covert Layer Builder\n(L1..Ln + LBM)" as Covert
+participant "Crypto Engine\n(KDF + AEAD)" as Crypto
+participant "C2PA Builder\n(Claims + Signature)" as C2PA
+participant "Renderer\n(QR + optional covert tiles)" as Render
+participant "Distribution\n(Export/Send)" as Dist
+
+== Configure Issuance ==
+Org -> Console : Create event config\n(tiers, zones, validity window)
+Console -> Issuer : Submit issuance request\n(event_id, policy, attendee roster)
+
+Issuer -> Policy : Compile IntentMark policy\n(intent type, constraints, accepted proofs)
+Policy --> Issuer : PolicySpec
+
+opt Initialize cryptographic context
+  Issuer -> Keys : Load issuer signing key(s)\n+ root secret K_root
+  Keys --> Issuer : signing_key, K_root
+end
+
+== Per Attendee IntentMark ==
+loop For each attendee / credential
+  Issuer -> PubEnc : Build public payload\n(event_id, time window, ref)
+  PubEnc --> Issuer : public_payload (URI/JSON)
+
+  opt Build covert layers (optional)
+    Issuer -> Covert : Prepare layer plan\n(L1..Ln, optional LBM)
+    Covert --> Issuer : LayerPlan
+
+    Issuer -> Crypto : Derive per-layer keys\nK_layer = KDF(K_root,\n intent_id, layer_id,\n manifest_digest?, claims?)
+    Crypto --> Issuer : {K_L1..K_Ln}
+
+    Issuer -> Covert : Encrypt layer payloads\nusing AEAD (AES-GCM/ChaCha)\n+ embed LBMs if enabled
+    Covert --> Issuer : covert_layers_ciphertext
+  end
+
+  opt Build C2PA manifest (optional but recommended)
+    Issuer -> C2PA : Assemble claims\n(issuer, intent, validity,\n visual hash policy, proof reqs,\n binding options A-E)
+    opt Bind C2PA <-> covert capacity
+      note right of C2PA
+        Optional binding choices:
+        A: manifest commits to covert layers
+        B: covert layer points to manifest digest
+        C: mutual binding
+        D: manifest-bound KDF inputs
+        E: Merkle proof of covert presence
+      end note
+    end
+    Issuer -> C2PA : Sign manifest\n(ECC/PQC supported)
+    C2PA --> Issuer : c2pa_manifest_bytes
+  end
+
+  Issuer -> Render : Render standard QR\nfrom public_payload
+  opt Overlay covert capacity
+    Issuer -> Render : Embed covert tiles\n(covert_layers_ciphertext)
+  end
+  opt Attach/Embed C2PA
+    Issuer -> Render : Attach C2PA manifest\n(to image container/sidecar)
+  end
+  Render --> Issuer : IntentMark artifact\n(image + optional manifest)
+
+  Issuer -> Dist : Export / distribute\n(PNG/PDF/mobile delivery)
+  Dist --> Issuer : delivery_receipt
+end
+
+== Completion ==
+Issuer --> Console : Issuance summary\n(count, validity, keys used)
+Console --> Org : Ready for use
+
+@enduml

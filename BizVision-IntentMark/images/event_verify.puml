@@ -1,0 +1,80 @@
+@startuml
+title IntentMark — High-Value Event Use Case — Verification Sequence
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam roundcorner 12
+skinparam ArrowColor #333333
+skinparam DefaultTextAlignment left
+skinparam sequenceMessageAlign left
+skinparam ParticipantPadding 18
+
+actor "Attendee\n(Holder)" as Holder
+actor "Gate Staff\n(Verifier Operator)" as Staff
+participant "Verifier App\n(IntentMark Reader)" as Reader
+participant "QR Decoder\n(Standard)" as QR
+participant "C2PA Verifier\n(Manifest validation)" as C2PAV
+participant "Visual Integrity Checker\n(strict/perceptual hash)" as VHash
+participant "Capability Resolver\n(Token/VC/DID/Attest)" as Cap
+participant "Covert Decoder\n(Progressive L1..Ln)" as CovertDec
+participant "Crypto Engine\n(KDF + AEAD)" as Crypto
+participant "Trust Engine\n(Allow/Warn/Escalate/Deny)" as Trust
+participant "UI Renderer\n(Operator guidance)" as UI
+
+== Scan ==
+Holder -> Staff : Present IntentMark\n(on screen / badge)
+Staff -> Reader : Scan QR image
+Reader -> QR : Decode public payload
+QR --> Reader : public_payload
+
+== Optional: Verify provenance ==
+opt C2PA manifest present
+  Reader -> C2PAV : Parse + verify manifest\n(signature, chain, claims)
+  C2PAV --> Reader : manifest_status\n(valid/invalid/absent details)
+
+  opt Visual integrity enabled
+    Reader -> VHash : Canonicalize + hash\n(compare to manifest claim)
+    VHash --> Reader : visual_integrity\n(match/mismatch/uncertain)
+  end
+end
+
+== Determine verifier capability ==
+opt Capability proof required by policy
+  Reader -> Cap : Obtain/validate capability\n(local cache / token / VC / attestation)
+  Cap --> Reader : capability_claims\n(scopes, roles, assurance)
+end
+
+== Optional: Progressive Covert Decoding ==
+opt Covert capacity present and supported
+  Reader -> CovertDec : Locate covert regions\n+ synchronization (LBM if present)
+  CovertDec --> Reader : covert_structure\n(layers available, boundaries)
+
+  loop Decode layers sequentially (L1..Ln)
+    Reader -> Crypto : Derive K_layer\nKDF(K_root, intent_id,\n layer_id, manifest_digest?,\n capability_claims)
+    Crypto --> Reader : K_layer (or failure)
+
+    Reader -> CovertDec : Decrypt + validate layer\n(AEAD verify)
+    CovertDec --> Reader : layer_result\n(success/fail) + layer_claims
+
+    alt Layer decrypt/validate fails
+      note right of CovertDec
+        Stop-on-failure rule:
+        Reader MUST stop decoding at the
+        highest validated layer.
+      end note
+      break
+    else Layer decrypt/validate succeeds
+      Reader -> Trust : Accumulate verified claims\n(layer_claims)
+    end
+  end
+end
+
+== Trust Resolution ==
+Reader -> Trust : Resolve decision\n(public payload + manifest status\n+ visual integrity + verified layers\n+ local policy)
+Trust --> Reader : decision\n(Allow/Warn/Escalate/Deny)\n+ reason codes
+
+== Operator Guidance ==
+Reader -> UI : Render outcome\n(decision, tier, gate, warnings)
+UI --> Staff : Show action\n(e.g., allow entry, redirect gate,\ncall supervisor)
+
+@enduml

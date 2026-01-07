@@ -1,0 +1,8 @@
+cryptography
+numpy
+opencv-python
+pillow
+protobuf
+pyzbar
+qrcode
+streamlit

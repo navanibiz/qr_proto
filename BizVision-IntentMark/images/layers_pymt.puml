@@ -1,0 +1,31 @@
+@startuml
+title Optional: Private Layers & NFC Recovery
+
+actor Customer as C
+participant "Google Pay" as GPay
+participant "NFC Tag\n(Canonical Image)" as NFC
+participant "Paytm (Issuer)" as Paytm
+
+== NFC recovery for printed QR ==
+opt Printed QR lost metadata or layers
+C -> GPay: Tap NFC
+GPay -> NFC: Read canonical QR image
+NFC --> GPay: Lossless image\n(L0 + C2PA + layers)
+GPay -> GPay: Re-verify public claims
+end opt
+
+== Issuer-specific layers ==
+note over GPay,Paytm
+Private layers are NOT ambient trust.
+They require explicit relationship or consent.
+end note
+
+alt Explicit partnership / permission exists
+GPay -> Paytm: Verify or interpret Paytm-only layer\n(using agreed interface)
+Paytm --> GPay: Result (e.g., fresh / valid / rotated)
+GPay -> GPay: Optionally increase assurance
+else No partnership
+GPay -> GPay: Ignore private layer safely\nRely on public claims only
+end alt
+
+@enduml

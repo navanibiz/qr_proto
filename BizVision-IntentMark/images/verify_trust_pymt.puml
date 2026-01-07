@@ -1,0 +1,31 @@
+@startuml
+title Google Pay Verification + Payment Flow (Verifier Role)
+
+actor Customer as C
+participant "Google Pay (Verifier)" as GPay
+participant "QR Image\n(L0 + C2PA)" as QR
+participant "C2PA Manifest" as C2PA
+participant "UPI Rail" as UPI
+
+== Scan ==
+C -> GPay: Scan QR
+GPay -> QR: Decode visible payload (L0)
+GPay -> C2PA: Extract & verify public attestation
+
+C2PA --> GPay: Issuer=Paytm\nIntent=Payment\nIntegrity=Valid
+
+alt Attestation valid & intent acceptable
+GPay -> C: Show clear intent & merchant context
+GPay -> UPI: Initiate standard UPI payment
+UPI --> GPay: Success / Failure
+GPay --> C: Show result
+else Attestation missing or unverifiable
+GPay -> C: Warn or proceed as today\n(policy decision)
+GPay -> UPI: Optional payment initiation
+UPI --> GPay
+GPay --> C
+else Attestation invalid / intent mismatch
+GPay -> C: Strong warning or deny
+end alt
+
+@enduml

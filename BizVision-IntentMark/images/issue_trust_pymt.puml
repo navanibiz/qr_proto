@@ -1,0 +1,31 @@
+@startuml
+title QR Creation + Paytm Attestation (Issuer Role)
+
+actor Vendor as V
+participant "Base UPI QR (L0)" as L0
+participant "Paytm (Issuer)" as Paytm
+participant "C2PA Manifest\n(Public Claims)" as C2PA
+participant "Paytm-only Layer (L2)" as L2
+
+== Vendor creates base QR ==
+V -> L0: Generate standard UPI QR\n(upi://pay?... pa=VPA&pn=Name&am=optional)
+note right of L0
+L0 is backward-compatible and works everywhere.
+No trust or intent claims yet.
+end note
+
+== Paytm verifies and attests ==
+V -> Paytm: Submit existing QR for verification
+Paytm -> Paytm: Verify merchant onboarding\nVerify VPA control\nCheck issuance context
+Paytm -> C2PA: Create signed public attestation\n- Issuer: Paytm\n- Merchant identity ref\n- Declared intent\n- Integrity hash
+C2PA --> Paytm: Signed manifest
+
+opt Add Paytm-only issuer-specific layer
+Paytm -> L2: Embed private layer (rotation, staff cues, risk hooks)
+Paytm -> C2PA: Declare existence + hash of L2
+C2PA --> Paytm: Updated manifest
+end opt
+
+Paytm -> V: Deliver augmented QR image\n(L0 + C2PA + optional L2)
+
+@enduml

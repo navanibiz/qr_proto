@@ -1,9 +1,31 @@
 from PIL import Image
 import numpy as np
 
-def extract_tiles_from_image(image_path: str, module_size: int = 27):
+# def extract_tiles_from_image(image_path: str, module_size: int = 27):
+#     """
+#     Extracts a grid of RGBA tiles from a QR code image with overlaid recursive T-square tiles.
+#     """
+#     img = Image.open(image_path).convert("RGBA")
+#     width, height = img.size
+#     grid_size_x = width // module_size
+#     grid_size_y = height // module_size
+
+#     tiles = []
+#     for y in range(grid_size_y):
+#         row = []
+#         for x in range(grid_size_x):
+#             left = x * module_size
+#             upper = y * module_size
+#             tile = img.crop((left, upper, left + module_size, upper + module_size))
+#             row.append(tile)
+#         tiles.append(row)
+
+#     return tiles
+
+def extract_tiles_from_image(image_path: str, module_size: int = 27, **kwargs):
     """
     Extracts a grid of RGBA tiles from a QR code image with overlaid recursive T-square tiles.
+    Accepts and ignores extra keyword arguments for compatibility.
     """
     img = Image.open(image_path).convert("RGBA")
     width, height = img.size
@@ -21,6 +43,7 @@ def extract_tiles_from_image(image_path: str, module_size: int = 27):
         tiles.append(row)
 
     return tiles
+
 
 def is_black_tile(tile, threshold=80):
     grayscale = tile.convert("L")
@@ -69,65 +92,75 @@ def extract_byte_from_recursive_tile(tile, depth=1):
         byte_stream = (byte_stream << 1) | bit
     total_bits = 8 ** depth
     return byte_stream.to_bytes(total_bits // 8, byteorder='big')
-
-def extract_bitstream_from_recursive_qr(image_path, module_size=27):
+def extract_bitstream_from_recursive_qr(
+    image_path,
+    module_size=27,
+    depth=1,
+    tile_start=0,
+    bit_limit=None
+):
     """
-    Extracts the fractal bitstream from a QR image, using the embedded JSON header
-    to determine depth and bit length. Assumes each tile contains a full byte.
-    """
-    import json
+    Extracts a raw bitstream from the QR image using T-square fractal decoding.
+    Caller must specify depth, tile_start, and optional bit_limit in bits.
 
+    Parameters:
+    - image_path: Path to QR image file.
+    - module_size: Pixel size of each tile (default 27).
+    - depth: Fractal depth used for each tile (default 1).
+    - tile_start: Tile index to start from (default 0).
+    - bit_limit: Optional cap on number of bits to return.
+
+    Returns:
+    - bitstream: String of 0s and 1s
+    """
     tiles = extract_tiles_from_image(image_path, module_size=module_size)
 
     black_tiles = []
-    used_coords = []
-
-    for y, row in enumerate(tiles):
-        for x, tile in enumerate(row):
+    for row in tiles:
+        for tile in row:
             if is_black_tile(tile):
                 black_tiles.append(tile)
-                used_coords.append((x, y))
 
-    if len(black_tiles) < 3:
-        raise ValueError("Not enough black tiles to extract header.")
+    if tile_start >= len(black_tiles):
+        raise ValueError(f"tile_start={tile_start} exceeds available black tiles={len(black_tiles)}")
 
-    # === Step 1: Parse header from first N bytes (e.g. until '}')
-    header_bytes = []
-    for tile in black_tiles[:64]:  # cap at 64 header tiles
-        byte = extract_byte_from_recursive_tile(tile, depth=1)
-        if isinstance(byte, bytes):  # handle bytes object
-            byte = byte[0]
-        header_bytes.append(byte)
-        if byte == ord('}'):
-            break
+    usable_tiles = black_tiles[tile_start:]
 
-    try:
-        header_str = bytes(header_bytes).decode("utf-8", errors="ignore")  # ignore bad chars
-        json_start = header_str.find('{')
-        if json_start != -1:
-            header_str = header_str[json_start:]  # strip anything before {
-        print("[DEBUG] Cleaned Header String:", repr(header_str))
-        header = json.loads(header_str)
-        depth = header["depth"]
-        bit_length = header["bit_length"]
-    except Exception as e:
-        raise ValueError(f"Failed to parse header JSON: {e}")
+    bits_per_tile = 8 * (8 ** (depth - 1))  # Each tile gives this many bits
+    tiles_to_extract = len(usable_tiles)
 
-    bits_per_tile = 8 * (8 ** (depth - 1))
-    tiles_needed = (bit_length + bits_per_tile - 1) // bits_per_tile
-    total_tiles_to_read = len(header_bytes) + tiles_needed
+    if bit_limit:
+        max_tiles = (bit_limit + bits_per_tile - 1) // bits_per_tile
+        tiles_to_extract = min(tiles_to_extract, max_tiles)
 
-    if len(black_tiles) < total_tiles_to_read:
-        raise ValueError(f"QR has only {len(black_tiles)} black tiles, but need {total_tiles_to_read}")
+    bit_chunks = []
+    for tile in usable_tiles[:tiles_to_extract]:
+        byte_data = extract_byte_from_recursive_tile(tile, depth=depth)
+        if isinstance(byte_data, bytes):
+            byte_data = int.from_bytes(byte_data, byteorder='big')
+        bin_str = format(byte_data, f'0{bits_per_tile}b')
+        bit_chunks.append(bin_str)
 
-    # === Step 2: Extract payload bytes using calculated depth
-    payload_tiles = black_tiles[len(header_bytes):len(header_bytes) + tiles_needed]
-    bit_chunks = [
-        format(int.from_bytes(extract_byte_from_recursive_tile(tile, depth=depth), byteorder='big'), f'0{bits_per_tile}b')
-        for tile in payload_tiles
-    ]
+    bitstream = ''.join(bit_chunks)
+    if bit_limit:
+        bitstream = bitstream[:bit_limit]
 
-    full_bitstream = ''.join(bit_chunks)[:bit_length]
-    print(f"[HEADER] depth={depth}, bit_length={bit_length}, bits_per_tile={bits_per_tile}")
-    print(f"[DECODE] Extracted {len(payload_tiles)} tiles → {len(full_bitstream)} bits")
-    return full_bitstream
+    print(f"[DECODE] depth={depth}, tile_start={tile_start}, bits_per_tile={bits_per_tile}")
+    print(f"[DECODE] Extracted {tiles_to_extract} tiles → {len(bitstream)} bits")
+    return bitstream
+
+
+def extract_tiles_by_color(img, color, module_size=10, tolerance=10):
+    import numpy as np
+
+    h, w = img.shape[:2]
+    tiles = []
+
+    for y in range(0, h, module_size):
+        for x in range(0, w, module_size):
+            tile = img[y:y+module_size, x:x+module_size]
+            avg_color = np.mean(tile.reshape(-1, 3), axis=0)
+            if np.all(np.abs(avg_color - np.array(color)) < tolerance):
+                tiles.append(tile)
+
+    return tiles
