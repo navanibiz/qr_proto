@@ -4,8 +4,8 @@ import qrcode
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
 from google.protobuf.json_format import MessageToDict
-from proto.event_pb2 import Event, AccessLevelVIP, AccessLevelStaff, AccessLevelPublic
-from render_qr_with_t_squares import render_qr_with_t_squares_partial
+from proto.event_pb2 import Event, AccessLevelVIP, AccessLevelStaff, AccessLevelPublic, AccessLevelAsserter
+from render_qr_with_t_squares import render_qr_with_t_squares_partial, generate_recursive_t_square_tile_from_bytes
 from structured_codec import encode_sections_protobuf, decode_sections_protobuf
 from decoder import extract_bitstream_from_qr
 from reccursive_decoder import extract_bitstream_from_recursive_qr, extract_tiles_from_image, is_black_tile, extract_byte_from_recursive_tile
@@ -35,6 +35,39 @@ def generate_dummy_filler_bitstream(depth: int, tile_count: int, bits_per_tile: 
     return bitstream, color
 
 
+def append_overlay_to_existing_qr(
+    image_path: str,
+    bitstream: str,
+    module_size: int,
+    depth: int,
+    start_tile: int,
+) -> Image.Image:
+    tiles = extract_tiles_from_image(image_path, module_size=module_size)
+    positions = []
+    for y, row in enumerate(tiles):
+        for x, tile in enumerate(row):
+            if is_black_tile(tile):
+                positions.append((x * module_size, y * module_size))
+
+    bits_per_tile = 8 ** depth
+    bit_chunks = [
+        bitstream[i:i + bits_per_tile].ljust(bits_per_tile, "0")
+        for i in range(0, len(bitstream), bits_per_tile)
+    ]
+
+    if start_tile + len(bit_chunks) > len(positions):
+        raise ValueError("Not enough black tiles to append the asserter overlay.")
+
+    img = Image.open(image_path).convert("RGB")
+    for idx, chunk_bits in enumerate(bit_chunks):
+        tile_idx = start_tile + idx
+        byte_values = [int(chunk_bits[i:i + 8], 2) for i in range(0, len(chunk_bits), 8)]
+        overlay = generate_recursive_t_square_tile_from_bytes(byte_values, module_size, depth=depth)
+        img.paste(overlay, positions[tile_idx], overlay)
+
+    return img
+
+
 def find_suitable_qr_matrix(bitstream: str, public_payload: str, max_version: int = 40, bits_per_tile: int = 8):
     required_bytes = math.ceil(len(bitstream) / bits_per_tile) + 2
     print(f"required_bytes is {required_bytes} for bits_per_tile={bits_per_tile}")
@@ -58,18 +91,34 @@ def find_suitable_qr_matrix(bitstream: str, public_payload: str, max_version: in
     raise ValueError(f"[ERROR] ❌ No QR version found with enough black tiles for {required_bytes} bytes")
 
 
-def load_key(path, is_private=False):
-    with open(path, "rb") as f:
-        key_data = f.read()
-    return serialization.load_pem_private_key(key_data, password=None) if is_private \
+_KEY_CACHE = {}
+
+
+def load_key(path, is_private=False, required=False):
+    cache_key = (path, is_private)
+    if cache_key in _KEY_CACHE:
+        return _KEY_CACHE[cache_key]
+    try:
+        with open(path, "rb") as f:
+            key_data = f.read()
+    except FileNotFoundError:
+        if required:
+            raise
+        _KEY_CACHE[cache_key] = None
+        return None
+    key = (
+        serialization.load_pem_private_key(key_data, password=None)
+        if is_private
         else serialization.load_pem_public_key(key_data)
+    )
+    _KEY_CACHE[cache_key] = key
+    return key
 
-vip_pub = load_key("keys/vip_public.pem")
-vip_priv = load_key("keys/vip_private.pem", is_private=True)
-staff_pub = load_key("keys/staff_public.pem")
-staff_priv = load_key("keys/staff_private.pem", is_private=True)
-
-def encrypt_rsa(public_key, message: str) -> str:
+def encrypt_rsa(public_key, message) -> str:
+    if message is None:
+        message = ""
+    elif not isinstance(message, str):
+        message = json.dumps(message, separators=(",", ":"), sort_keys=True)
     return public_key.encrypt(
         message.encode(),
         padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
@@ -83,6 +132,15 @@ def decrypt_rsa(private_key, ciphertext_hex: str) -> str:
     ).decode()
 
 
+def safe_decrypt_rsa(private_key, ciphertext_hex: str):
+    if not ciphertext_hex:
+        return None
+    try:
+        return decrypt_rsa(private_key, ciphertext_hex)
+    except Exception:
+        return None
+
+
 def from_json(data: dict) -> Event:
     event = Event(
         event_id=data["event_id"],
@@ -94,26 +152,101 @@ def from_json(data: dict) -> Event:
     if "public_data" in data:
         event.public_data.CopyFrom(AccessLevelPublic(**data["public_data"]))
     if "vip_data" in data:
+        vip_pub = load_key("keys/vip_public.pem", required=True)
         vip = AccessLevelVIP()
         vip.vip_lounge_location = encrypt_rsa(vip_pub, data["vip_data"]["vip_lounge_location"])
         vip.vip_contact = encrypt_rsa(vip_pub, data["vip_data"]["vip_contact"])
         vip.exclusive_sessions.extend([encrypt_rsa(vip_pub, s) for s in data["vip_data"]["exclusive_sessions"]])
         event.vip_data.CopyFrom(vip)
     if "staff_data" in data:
+        staff_pub = load_key("keys/staff_public.pem", required=True)
         staff = AccessLevelStaff()
         staff.internal_briefing = encrypt_rsa(staff_pub, data["staff_data"]["internal_briefing"])
         staff.security_codes.extend([encrypt_rsa(staff_pub, s) for s in data["staff_data"]["security_codes"]])
         staff.requires_background_check = data["staff_data"]["requires_background_check"]
         event.staff_data.CopyFrom(staff)
+    if "asserter_data" in data:
+        asserter_pub = load_key("keys/asserter_public.pem", required=True)
+        asserter = AccessLevelAsserter()
+        asserter.asserter_app_version = encrypt_rsa(asserter_pub, data["asserter_data"]["asserter_app_version"])
+        asserter.geolocation = encrypt_rsa(asserter_pub, data["asserter_data"]["geolocation"])
+        asserter.assertion_valid_until = encrypt_rsa(asserter_pub, data["asserter_data"]["assertion_valid_until"])
+        event.asserter_data.CopyFrom(asserter)
     return event
 
-def encode_from_dict(json_data: dict, filename: str = "fractalized_qr.png", dimension: int = 1):
+def generate_public_qr(public_payload: str, max_version: int, module_size: int):
+    matrix = find_suitable_qr_matrix(
+        bitstream="0" * 8,  # placeholder to satisfy capacity check
+        public_payload=public_payload,
+        max_version=max_version,
+        bits_per_tile=8,
+    )
+    qr_size = len(matrix)
+    image_size = qr_size * module_size
+    img = Image.new("RGB", (image_size, image_size), "white")
+    for y in range(qr_size):
+        for x in range(qr_size):
+            if matrix[y][x]:
+                img.paste("black", (x * module_size, y * module_size,
+                                    (x + 1) * module_size, (y + 1) * module_size))
+    return img, matrix
+
+
+def save_public_qr(public_payload: str, filename: str, module_size: int, max_version: int = 40):
+    img, matrix = generate_public_qr(public_payload, max_version=max_version, module_size=module_size)
+    img.save(filename)
+    return filename, matrix
+
+
+def apply_overlays(
+    base_img: Image.Image,
+    matrix,
+    header_bitstream: str,
+    filler_bitstream: str,
+    secret_bitstream: str,
+    module_size: int,
+    depth: int,
+):
+    tile_index = 0
+    img, tile_index = render_qr_with_t_squares_partial(
+        matrix, header_bitstream, module_size=module_size, depth=1, start_tile=tile_index, img=base_img
+    )
+    img, tile_index = render_qr_with_t_squares_partial(
+        matrix, filler_bitstream, module_size=module_size, depth=1, start_tile=tile_index, img=img, color=FILLER_COLOR_PURPLE
+    )
+    img, tile_index = render_qr_with_t_squares_partial(
+        matrix, secret_bitstream, module_size=module_size, depth=depth, start_tile=tile_index, img=img
+    )
+    total_black_tiles = sum(row.count(1) for row in matrix)
+    remaining_tiles = total_black_tiles - tile_index
+    if remaining_tiles > 0:
+        end_filler_bitstream, end_filler_color = generate_dummy_filler_bitstream(
+            depth=1,
+            tile_count=remaining_tiles,
+            bits_per_tile=8,
+            color=FILLER_COLOR_BLUE
+        )
+        img, tile_index = render_qr_with_t_squares_partial(
+            matrix, end_filler_bitstream, module_size=module_size, depth=1, start_tile=tile_index, img=img, color=end_filler_color
+        )
+    return img
+
+
+def encode_from_dict(
+    json_data: dict,
+    filename: str = "fractalized_qr.png",
+    dimension: int = 1,
+    return_metadata: bool = False,
+    reserve_bits: int = 0,
+    asserter_max_depth: int | None = None,
+):
     from_json_proto = from_json(json_data)
     base_fields = MessageToDict(from_json_proto, preserving_proto_field_name=True)
 
     # Strip hidden roles from public layer
     base_fields.pop("vip_data", None)
     base_fields.pop("staff_data", None)
+    base_fields.pop("asserter_data", None)
 
     # Encode public layer (URL with base64 JSON)
     compact_json = json.dumps(base_fields, separators=(",", ":"), sort_keys=True)
@@ -123,15 +256,23 @@ def encode_from_dict(json_data: dict, filename: str = "fractalized_qr.png", dime
     print(f"Public URL : {public_payload}")
 
     # Encode hidden protobuf data
-    secret_bitstream = encode_sections_protobuf({
-        "VIP": from_json_proto.vip_data,
-        "STAFF": from_json_proto.staff_data
-    }, depth=dimension)
+    sections = {}
+    if from_json_proto.HasField("vip_data"):
+        sections["VIP"] = from_json_proto.vip_data
+    if from_json_proto.HasField("staff_data"):
+        sections["STAFF"] = from_json_proto.staff_data
+    if from_json_proto.HasField("asserter_data"):
+        sections["ASSERTER"] = from_json_proto.asserter_data
+    secret_bitstream = encode_sections_protobuf(sections, depth=dimension)
+    secret_bytes = bytes(
+        int(secret_bitstream[i:i + 8], 2) for i in range(0, len(secret_bitstream), 8)
+    )
 
     # Compute tile capacity
     bits_per_tile = 8 ** dimension
     print(f"bits_per_tile is {bits_per_tile} for (dimension={dimension})")
-    module_size = compute_module_size(dimension)
+    max_depth = max(dimension, asserter_max_depth or dimension)
+    module_size = compute_module_size(max_depth)
 
     # Filler and header (depth=1 only)
     #filler_bitstream, filler_color = generate_dummy_filler_bitstream(1, bits_per_tile=8, color=FILLER_COLOR_PURPLE)
@@ -148,7 +289,12 @@ def encode_from_dict(json_data: dict, filename: str = "fractalized_qr.png", dime
         "bit_length": len(secret_bitstream),
         "bits_per_tile": bits_per_tile,
         "filler_bits": len(filler_bitstream),
-        "module_size": module_size
+        "module_size": module_size,
+        "reserve_bits": reserve_bits,
+        "asserter_max_depth": asserter_max_depth,
+        "asserter_bits_per_tile": (8 ** asserter_max_depth) if asserter_max_depth else None,
+        "asserter_module_size": compute_module_size(asserter_max_depth) if asserter_max_depth else None,
+        "asserter_reserve_bits": reserve_bits,
     }
     header_bytes = json.dumps(header_json, separators=(",", ":")).encode("utf-8")
 
@@ -161,50 +307,27 @@ def encode_from_dict(json_data: dict, filename: str = "fractalized_qr.png", dime
     # Combine bitstream
     flattened_bitstream = header_bitstream + filler_bitstream + secret_bitstream
 
-    # Find suitable QR version
+    # Find suitable QR version (reserve optional capacity for asserter layer)
+    capacity_bitstream = flattened_bitstream + ("0" * max(0, reserve_bits))
     matrix = find_suitable_qr_matrix(
-        bitstream=flattened_bitstream,
+        bitstream=capacity_bitstream,
         public_payload=public_payload,
         bits_per_tile=bits_per_tile
     )
 
-    # Draw tiles layer by layer
-    # --- Write tiles in streaming fashion
-    tile_index = 0
+    # Step 1: Generate visible QR (L0)
+    base_img, _ = generate_public_qr(public_payload, max_version=40, module_size=module_size)
 
-    # Header (red by default for depth=1)
-    img, tile_index = render_qr_with_t_squares_partial(
-        matrix, header_bitstream, module_size=module_size, depth=1, start_tile=tile_index
+    # Step 2: Apply overlays (header + filler + secret)
+    img = apply_overlays(
+        base_img=base_img,
+        matrix=matrix,
+        header_bitstream=header_bitstream,
+        filler_bitstream=filler_bitstream,
+        secret_bitstream=secret_bitstream,
+        module_size=module_size,
+        depth=dimension,
     )
-
-    # Filler (purple)
-    img, tile_index = render_qr_with_t_squares_partial(
-        matrix, filler_bitstream, module_size=module_size, depth=1, start_tile=tile_index, img=img, color=filler_color
-    )
-
-    # Secret (keep default red or use custom color depending on depth)
-    img, tile_index = render_qr_with_t_squares_partial(
-        matrix, secret_bitstream, module_size=module_size, depth=dimension, start_tile=tile_index, img=img
-    )
-
-    # Fill remaining tiles with blue filler (depth=1)
-    total_black_tiles = sum(row.count(1) for row in matrix)
-    remaining_tiles = total_black_tiles - tile_index
-    print(f"tile_index used: {tile_index}, total black tiles: {total_black_tiles}")
-
-    if remaining_tiles > 0:
-        end_filler_bitstream, end_filler_color = generate_dummy_filler_bitstream(
-            depth=1,
-            tile_count=remaining_tiles,
-            bits_per_tile=bits_per_tile,
-            color=FILLER_COLOR_BLUE  # Make sure this is RGB if passed to an RGB image
-        )
-            
-
-        print(f"[INFO] Filling {remaining_tiles} remaining tiles with blue layer (depth=1)")
-        img, tile_index = render_qr_with_t_squares_partial(
-            matrix, end_filler_bitstream, module_size=module_size, depth=1, start_tile=tile_index, img=img, color=end_filler_color
-        )
         
 
     # Save QR image + proto blob
@@ -213,6 +336,14 @@ def encode_from_dict(json_data: dict, filename: str = "fractalized_qr.png", dime
         f.write(from_json_proto.SerializeToString())
 
     print(f"✅ Encoded QR with header (depth=1) + secret (depth={dimension}) saved to '{filename}'")
+    if return_metadata:
+        return {
+            "filename": filename,
+            "public_payload": public_payload,
+            "secret_bytes": secret_bytes,
+            "header": header_json,
+            "public_qr_image": base_img,
+        }
 
 def extract_tiles_by_color(img, color, module_size=10, tolerance=10):
     import numpy as np
@@ -284,6 +415,44 @@ def extract_header_from_qr(img_path: str, module_size: int = MODULE_SIZE, max_ti
         raise
 
     return header, json_end + 1
+
+
+def decode_asserter_overlay(
+    image_path: str,
+    header: dict,
+    header_end_tile: int,
+) -> dict | None:
+    reserve_bits = header.get("asserter_reserve_bits") or header.get("reserve_bits") or 0
+    asserter_max_depth = header.get("asserter_max_depth") or 1
+    if reserve_bits <= 0:
+        return None
+
+    filler_bits = header.get("filler_bits", FILLER_TILE_COUNT * 8)
+    filler_tiles = math.ceil(filler_bits / 8)
+    issuer_bits_per_tile = header.get("bits_per_tile", 8)
+    issuer_tiles = math.ceil(header.get("bit_length", 0) / issuer_bits_per_tile)
+    tile_start = header_end_tile + filler_tiles + issuer_tiles
+
+    for depth in range(int(asserter_max_depth), 0, -1):
+        try:
+            bitstream = extract_bitstream_from_recursive_qr(
+                image_path=image_path,
+                module_size=header.get("module_size", MODULE_SIZE),
+                depth=depth,
+                tile_start=tile_start,
+                bit_limit=reserve_bits,
+            )
+            if not bitstream:
+                continue
+            compressed = bytes(int(bitstream[i:i+8], 2) for i in range(0, len(bitstream), 8))
+            sections = decode_sections_protobuf(compressed, {
+                "ASSERTER": AccessLevelAsserter,
+            })
+            if sections.get("ASSERTER"):
+                return {"sections": sections, "depth": depth}
+        except Exception:
+            continue
+    return None
 
 # def extract_header_from_image(img_np: np.ndarray, module_size: int = 27):
 #     from PIL import Image
@@ -406,20 +575,75 @@ def decode_with_role(role: str, img_bytes: bytes):
         "STAFF": AccessLevelStaff,
     })
 
-    vip = sections["VIP"]
-    staff = sections["STAFF"]
+    vip = sections.get("VIP")
+    staff = sections.get("STAFF")
+    asserter = None
+    asserter_decode = decode_asserter_overlay("temp_qr.png", header, header_end_tile)
+    if asserter_decode:
+        asserter = asserter_decode["sections"].get("ASSERTER")
 
-    decrypted_vip = {
-        "vip_lounge_location": decrypt_rsa(vip_priv, vip.vip_lounge_location),
-        "vip_contact": decrypt_rsa(vip_priv, vip.vip_contact),
-        "exclusive_sessions": [decrypt_rsa(vip_priv, s) for s in vip.exclusive_sessions]
-    }
+    decrypted_vip = None
+    decrypted_staff = None
+    decrypted_asserter = None
 
-    decrypted_staff = {
-        "internal_briefing": decrypt_rsa(staff_priv, staff.internal_briefing),
-        "security_codes": [decrypt_rsa(staff_priv, s) for s in staff.security_codes],
-        "requires_background_check": staff.requires_background_check
-    }
+    role = role.lower()
+    has_hidden = False
+    if role in ("vip", "admin") and vip is not None:
+        vip_priv = load_key("keys/vip_private.pem", is_private=True)
+        if vip_priv:
+            decrypted_vip = {
+                "vip_lounge_location": safe_decrypt_rsa(vip_priv, vip.vip_lounge_location),
+                "vip_contact": safe_decrypt_rsa(vip_priv, vip.vip_contact),
+                "exclusive_sessions": [safe_decrypt_rsa(vip_priv, s) for s in vip.exclusive_sessions],
+            }
+            has_hidden = True
+
+    if role in ("staff", "admin") and staff is not None:
+        staff_priv = load_key("keys/staff_private.pem", is_private=True)
+        if staff_priv:
+            decrypted_staff = {
+                "internal_briefing": safe_decrypt_rsa(staff_priv, staff.internal_briefing),
+                "security_codes": [safe_decrypt_rsa(staff_priv, s) for s in staff.security_codes],
+                "requires_background_check": staff.requires_background_check
+            }
+            has_hidden = True
+
+    if role == "asserter" and asserter is not None:
+        asserter_priv = load_key("keys/asserter_private.pem", is_private=True)
+        if asserter_priv:
+            decrypted_asserter = {
+                "asserter_app_version": safe_decrypt_rsa(asserter_priv, asserter.asserter_app_version),
+                "geolocation": safe_decrypt_rsa(asserter_priv, asserter.geolocation),
+                "assertion_valid_until": safe_decrypt_rsa(asserter_priv, asserter.assertion_valid_until),
+            }
+            has_hidden = True
+
+    def has_content(payload: dict) -> bool:
+        if not payload:
+            return False
+        for key, val in payload.items():
+            if isinstance(val, list):
+                if any(item for item in val):
+                    return True
+            elif val not in (None, "", False):
+                return True
+        return False
+
+    if decrypted_vip and not has_content(decrypted_vip):
+        decrypted_vip = None
+    if decrypted_staff and not has_content(decrypted_staff):
+        decrypted_staff = None
+    if decrypted_asserter and not has_content(decrypted_asserter):
+        decrypted_asserter = None
+
+    if role == "vip":
+        has_hidden = decrypted_vip is not None
+    elif role == "staff":
+        has_hidden = decrypted_staff is not None
+    elif role == "asserter":
+        has_hidden = decrypted_asserter is not None
+    elif role == "admin":
+        has_hidden = any([decrypted_vip, decrypted_staff])
 
     print("🔓 Decrypted VIP Data:\n", decrypted_vip)
     print("🔓 Decrypted STAFF Data:\n", decrypted_staff)
@@ -447,15 +671,28 @@ def decode_with_role(role: str, img_bytes: bytes):
         general_data = {"error": "Could not detect a QR code for the public payload."}
 
     # Step 6: Role-based response
-    role = role.lower()
     if role == "general":
         return {"general": general_data}
     elif role == "vip":
-        return {"general": general_data, "vip": decrypted_vip}
+        if not has_hidden:
+            return {"general": general_data, "notice": "No additional information found for this ticket."}
+        return {"general": general_data, "vip": decrypted_vip or {}}
     elif role == "staff":
-        return {"general": general_data, "staff": decrypted_staff}
+        if not has_hidden:
+            return {"general": general_data, "notice": "No additional information found for this ticket."}
+        return {"general": general_data, "staff": decrypted_staff or {}}
+    elif role == "asserter":
+        if not has_hidden:
+            return {"general": general_data, "notice": "No additional information found for this ticket."}
+        return {"general": general_data, "asserter": decrypted_asserter or {}}
     elif role == "admin":
-        return {"general": general_data, "vip": decrypted_vip, "staff": decrypted_staff}
+        if not has_hidden:
+            return {"general": general_data, "notice": "No additional information found for this ticket."}
+        return {
+            "general": general_data,
+            **({"vip": decrypted_vip} if decrypted_vip else {}),
+            **({"staff": decrypted_staff} if decrypted_staff else {}),
+        }
     else:
         return {"error": f"Unknown role '{role}'"}
 

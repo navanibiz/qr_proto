@@ -23,3 +23,4 @@ def generate_key_pair(role):
 # Generate keys
 generate_key_pair("vip")
 generate_key_pair("staff")
+generate_key_pair("asserter")

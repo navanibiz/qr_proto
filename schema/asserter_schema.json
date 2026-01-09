@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "reserve": {
+    "asserter_bits": 2048
+  },
+  "layers": [
+    {
+      "id": "asserter",
+      "title": "✅ Asserter Data",
+      "target": "asserter_data",
+      "keys": {
+        "public_key": "keys/asserter_public.pem",
+        "private_key": "keys/asserter_private.pem"
+      },
+      "fields": [
+        {"id": "asserter_app_version", "label": "Asserter App Version", "type": "text", "default": "1.0.0"},
+        {"id": "geolocation", "label": "Geolocation", "type": "text", "default": "37.7749,-122.4194"},
+        {"id": "assertion_valid_until", "label": "Assertion Valid Until (ISO)", "type": "text", "default": "2025-09-12T23:59:59Z"}
+      ]
+    }
+  ]
+}

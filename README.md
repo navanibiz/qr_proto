@@ -45,6 +45,15 @@ pip install -r requirements.txt
 python generate_keys.py
 ```
 
+### 2b) Generate issuer cert/key for C2PA (optional)
+```bash
+python c2pa_integration/generate_issuer_cert.py
+```
+This writes a signing chain and key to `c2pa_integration/trust_store/`:
+- `issuer_cert.pem` (leaf + intermediate, used for signing)
+- `root_ca.pem` (trust anchor)
+- `issuer_private_key.pem`
+
 ### 3) Run the Streamlit UI
 ```bash
 streamlit run ui/Home.py
@@ -101,3 +110,4 @@ PY
 - Protobuf schema lives in `proto/event.proto`.
 - For depth > 1, module size must grow with depth (e.g., `3 ** (depth + 1)`) so leaf sampling uses at least 1px.
 - See `FUTURE_ENHANCEMENTS.md` for planned features and improvements.
+- See `ISSUER_ASSERTER_SEPARATION.md` for the issuer/asserter split and implications.

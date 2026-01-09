@@ -109,6 +109,32 @@ This model mirrors how content authenticity is handled for media, but applies it
 
 ---
 
+## 6.1 Offline Trust, No Internet Required
+
+IntentMark is designed to remain trustworthy **without connectivity**:
+
+* The QR carries signed intent and provenance metadata
+* Verification is local and deterministic
+* Policies can be enforced at scan time, even in air‑gapped or high‑latency environments
+
+This is critical for venues, payments, and identity checks where network access is unreliable or intentionally restricted.
+
+---
+
+## 6.2 Why This Matters in the Age of AI Agents
+
+AI agents are increasingly scanning QR codes and **taking actions on behalf of users**.
+
+Without explicit intent and provenance, agents are forced to guess or rely on external calls. IntentMark makes the QR itself **machine‑readable and trustworthy**, enabling:
+
+* deterministic agent decisions (allow / warn / deny)
+* safer automation without brittle heuristics
+* reduced risk of prompt or scan manipulation
+
+In short, IntentMark turns QR codes into **safe inputs for autonomous systems**, not just humans.
+
+---
+
 ## 7. Progressive Disclosure Within a Single Artifact
 
 IntentMark enables a single QR to contain **multiple encrypted disclosure tiers**, each independently accessible based on verifier capability.
@@ -193,6 +219,19 @@ IntentMark’s value does not depend on:
 It addresses a persistent boundary problem: **how humans safely initiate actions from visual cues**.
 
 As long as QR codes are used to trigger real‑world consequences, this gap remains.
+
+---
+
+## 11.1 SaaS Model Potential
+
+IntentMark can be offered as a SaaS platform:
+
+* issuer console to define schemas, policies, and keys
+* attester workflows for overlays and signed metadata
+* verifier SDKs and dashboards for trust outcomes
+* analytics for scan activity and policy exceptions
+
+This makes deployment turnkey while keeping the QR standard intact.
 
 ---
 

@@ -12,6 +12,7 @@ message Event {
   AccessLevelPublic public_data = 6;
   AccessLevelVIP vip_data = 7;
   AccessLevelStaff staff_data = 8;
+  AccessLevelAsserter asserter_data = 9;
 }
 
 message AccessLevelPublic {
@@ -30,4 +31,10 @@ message AccessLevelStaff {
   string internal_briefing = 1;
   repeated string security_codes = 2;
   bool requires_background_check = 3;
+}
+
+message AccessLevelAsserter {
+  string asserter_app_version = 1;
+  string geolocation = 2;
+  string assertion_valid_until = 3;
 }

@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "event_fields": [
+    {
+      "id": "event_id",
+      "label": "Event ID",
+      "type": "text",
+      "default": "EVT-2025-001"
+    },
+    {
+      "id": "name",
+      "label": "Event Name",
+      "type": "text",
+      "default": "FutureTech Expo 2025"
+    },
+    {
+      "id": "location",
+      "label": "Location",
+      "type": "text",
+      "default": "Convention Center, San Francisco"
+    },
+    {
+      "id": "start_time",
+      "label": "Start Time (ISO format)",
+      "type": "text",
+      "default": "2025-09-12T09:00:00Z"
+    },
+    {
+      "id": "end_time",
+      "label": "End Time (ISO format)",
+      "type": "text",
+      "default": "2025-09-12T18:00:00Z"
+    }
+  ],
+  "layers": [
+    {
+      "id": "public",
+      "title": "\ud83d\udce3 Public Data",
+      "target": "public_data",
+      "fields": [
+        {
+          "id": "agenda_summary",
+          "label": "Agenda Summary",
+          "type": "text",
+          "default": "Talks on AI, IoT, and Sustainable Tech"
+        },
+        {
+          "id": "dress_code",
+          "label": "Dress Code",
+          "type": "text",
+          "default": "Smart Casual"
+        },
+        {
+          "id": "general_guidelines",
+          "label": "General Guidelines (one per line)",
+          "type": "multiline",
+          "default": "Carry a valid photo ID\nNo outside food allowed\nArrive 15 minutes early"
+        }
+      ]
+    },
+    {
+      "id": "vip",
+      "title": "\ud83d\udd12 VIP Data",
+      "target": "vip_data",
+      "keys": {
+        "public_key": "keys/vip_public.pem",
+        "private_key": "keys/vip_private.pem"
+      },
+      "fields": [
+        {
+          "id": "vip_lounge_location",
+          "label": "VIP Lounge Location",
+          "type": "text",
+          "default": "2nd Floor, Sapphire Lounge"
+        },
+        {
+          "id": "vip_contact",
+          "label": "VIP Contact",
+          "type": "text",
+          "default": "vip@futuretech.com"
+        },
+        {
+          "id": "exclusive_sessions",
+          "label": "Exclusive Sessions (one per line)",
+          "type": "multiline",
+          "default": "AI Founders Roundtable\nPrivate Tour with CTO"
+        }
+      ]
+    },
+    {
+      "id": "staff",
+      "title": "\ud83d\udee1\ufe0f Staff Data",
+      "target": "staff_data",
+      "keys": {
+        "public_key": "keys/staff_public.pem",
+        "private_key": "keys/staff_private.pem"
+      },
+      "fields": [
+        {
+          "id": "internal_briefing",
+          "label": "Internal Briefing",
+          "type": "multiline",
+          "default": "Ensure secure entry checkpoints are staffed by 08:30AM."
+        },
+        {
+          "id": "security_codes",
+          "label": "Security Codes (one per line)",
+          "type": "multiline",
+          "default": "SEC-ALPHA-2025\nSEC-BETA-2025"
+        },
+        {
+          "id": "requires_background_check",
+          "label": "Requires Background Check",
+          "type": "bool",
+          "default": true,
+          "description": "This is for admin's information"
+        }
+      ]
+    }
+  ],
+  "asserter_reserve": {
+    "max_depth": 2,
+    "reserve_bits": 8192
+  }
+}
